@@ -2,10 +2,6 @@
 
 //! This module will be compiled when it's either linux_x86 or linux_x86_64.
 
-#[cfg(all(target_arch = "x86", not(target_feature = "sse2")))]
-use core::sync::atomic::compiler_fence;
-#[cfg(all(target_arch = "x86", not(target_feature = "sse2")))]
-use core::sync::atomic::Ordering;
 use std::cell::UnsafeCell;
 use std::fs::read_to_string;
 use std::io::ErrorKind;
@@ -204,12 +200,6 @@ fn monotonic_with_tsc() -> (Instant, u64) {
     (Instant::now(), tsc())
 }
 
-// The RDTSCP instruction waits until all previous instructions have been executed before reading
-// the counter. However, subsequent instructions may begin execution before the read operation is
-// performed. Therefore, we need to fence the instruction stream after the RDTSCP to ensure that no
-// instructions are executed until the read operation is complete. On x86-64 and x86 with SSE2, we
-// can use an LFENCE instruction for this purpose. On x86 without SSE2, we can use a compiler fence
-// to achieve the same effect.
 #[inline]
 fn tsc() -> u64 {
     #[cfg(target_arch = "x86")]
@@ -217,27 +207,6 @@ fn tsc() -> u64 {
     #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::__rdtscp;
 
-    // Case 1: 64-bit (always has SSE2/lfence) OR 32-bit with SSE2 enabled
-    #[cfg(any(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        #[cfg(target_arch = "x86")]
-        use core::arch::x86::_mm_lfence;
-        #[cfg(target_arch = "x86_64")]
-        use core::arch::x86_64::_mm_lfence;
-        let mut aux = 0u32;
-        unsafe {
-            let r = __rdtscp(&mut aux);
-            _mm_lfence();
-            r
-        }
-    }
-
-    // Case 2: 32-bit WITHOUT SSE2 enabled
-    #[cfg(all(target_arch = "x86", not(target_feature = "sse2")))]
-    {
-        let mut aux = 0u32;
-        let r = unsafe { __rdtscp(&mut aux) };
-        compiler_fence(Ordering::SeqCst);
-        r
-    }
+    let mut aux = 0u32;
+    unsafe { __rdtscp(&mut aux) }
 }
